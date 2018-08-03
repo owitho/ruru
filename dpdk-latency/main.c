@@ -430,7 +430,7 @@ print_stats(void)
 
 	printf("\nLcore statistics ====================================");
 
-	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+	RTE_LCORE_FOREACH(lcore_id) {
 		printf("\nStatistics for lcore %u ------------------------------"
 			   "\nPackets sent: %24"PRIu64
 			   "\nPackets received: %20"PRIu64
@@ -484,43 +484,6 @@ init_zmq_for_lcore(unsigned lcore_id){
 	lcore_conf[lcore_id].zmq_client = requester;
 }
 
-
-
-/* stats loop */
-static void
-dpdklatency_stats_loop(void)
-{
-	unsigned lcore_id;
-	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
-	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
-	
-	prev_tsc = 0;
-	timer_tsc = 0;
-
-	lcore_id = rte_lcore_id();
-
-	RTE_LOG(INFO, DPDKLATENCY, "entering stats loop on lcore %u\n", lcore_id);
-
-	while (!force_quit) {
-		cur_tsc = rte_rdtsc();
-		diff_tsc = cur_tsc - prev_tsc;
-		if (unlikely(diff_tsc > drain_tsc)) {
-			/* if timer is enabled */
-			if (timer_period > 0) {
-				/* advance the timer */
-				timer_tsc += diff_tsc;
-				/* if timer has reached its timeout */
-				if (unlikely(timer_tsc >= (uint64_t) timer_period)) {
-					print_stats();
-					/* reset the timer */
-					timer_tsc = 0;
-				}
-			}
-			prev_tsc = cur_tsc;
-		}
-	}
-}
-
 /* packet processing loop */
 static void
 dpdklatency_processing_loop(void)
@@ -562,6 +525,7 @@ dpdklatency_processing_loop(void)
 		/* TX burst queue drain	 */
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
+			/* print status by master lcore */
 			if (lcore_id == rte_get_master_lcore()) {
 				/* if timer is enabled */
 				if (timer_period > 0) {
