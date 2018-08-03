@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "eal_thread.h": "c",
+        "rte_lcore.h": "c",
+        "rte_launch.h": "c"
+    }
+}

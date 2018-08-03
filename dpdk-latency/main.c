@@ -530,23 +530,24 @@ dpdklatency_processing_loop(void)
 	unsigned i, j, portid, queueid, nb_rx;
 	struct lcore_conf *qconf;
 	struct rte_mbuf *m;
-	uint64_t prev_tsc, diff_tsc, cur_tsc;
+	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
 	uint64_t ipv4_timestamp_syn[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
 	uint64_t ipv4_timestamp_synack[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
 
 	prev_tsc = 0;
+	timer_tsc = 0;
 
 	lcore_id = rte_lcore_id();
 	qconf = &lcore_conf[lcore_id];
-	
-	/* Init ZMQ */
-	init_zmq_for_lcore(lcore_id);
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, DPDKLATENCY, "lcore %u has nothing to do - no RX queue assigned\n", lcore_id);
 		return;
 	}
+
+	/* Init ZMQ */
+	init_zmq_for_lcore(lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 		portid = qconf->rx_queue_list[i].port_id;
@@ -561,6 +562,19 @@ dpdklatency_processing_loop(void)
 		/* TX burst queue drain	 */
 		diff_tsc = cur_tsc - prev_tsc;
 		if (unlikely(diff_tsc > drain_tsc)) {
+			if (lcore_id == rte_get_master_lcore()) {
+				/* if timer is enabled */
+				if (timer_period > 0) {
+					/* advance the timer */
+					timer_tsc += diff_tsc;
+					/* if timer has reached its timeout */
+					if (unlikely(timer_tsc >= (uint64_t) timer_period)) {
+						print_stats();
+						/* reset the timer */
+						timer_tsc = 0;
+					}
+				}
+			}
 
 			for (portid = 0; portid < RTE_MAX_ETHPORTS; portid++) {
 				if (qconf->tx_mbufs[portid].len == 0)
@@ -1105,12 +1119,8 @@ main(int argc, char **argv)
 
 	ret = 0;
 
-	/* launch stats on master core */
-	printf("CALL_MASTER=%d\n", CALL_MASTER);
-	rte_eal_remote_launch((lcore_function_t *) dpdklatency_stats_loop, NULL, rte_get_master_lcore());
-	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
-		rte_eal_remote_launch((lcore_function_t *) dpdklatency_processing_loop, NULL, lcore_id);
-	}
+	/* launch processing loop on all core */
+	rte_eal_mp_remote_launch((lcore_function_t *) dpdklatency_processing_loop, NULL, CALL_MASTER);
 
 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
 		if (rte_eal_wait_lcore(lcore_id) < 0) {
