@@ -953,7 +953,7 @@ init_lcore_rx_queues(void)
 			printf("error: too many queues (%u) for lcore: %u\n",
 				(unsigned)nb_rx_queue + 1, (unsigned)lcore);
 			return -1;
-		} else {
+		} else {	
 			lcore_conf[lcore].rx_queue_list[nb_rx_queue].port_id =
 				lcore_params[i].port_id;
 			lcore_conf[lcore].rx_queue_list[nb_rx_queue].queue_id =
@@ -1105,8 +1105,9 @@ main(int argc, char **argv)
 
 	ret = 0;
 
-	/* launch stats on core 0 */
-	rte_eal_remote_launch((lcore_function_t *) dpdklatency_stats_loop, NULL, CALL_MASTER);
+	/* launch stats on master core */
+	printf("CALL_MASTER=%d\n", CALL_MASTER);
+	rte_eal_remote_launch((lcore_function_t *) dpdklatency_stats_loop, NULL, rte_get_master_lcore());
 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
 		rte_eal_remote_launch((lcore_function_t *) dpdklatency_processing_loop, NULL, lcore_id);
 	}
