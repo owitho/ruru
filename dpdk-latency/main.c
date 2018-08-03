@@ -580,7 +580,11 @@ dpdklatency_processing_loop(void)
 
 			/* Reading from RX queue */
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-			printf("reading from portid %u, queueid %u, nb_rx %u\n", portid, queueid, nb_rx);
+			if (nb_rx > 0) {
+				printf("reading from portid %u, queueid %u, nb_rx %u\n", portid, queueid, nb_rx);
+			} else {
+				printf(".");
+			}
 			lcore_statistics[lcore_id].rx += nb_rx;
 
 			for (j = 0; j < nb_rx; j++) {
