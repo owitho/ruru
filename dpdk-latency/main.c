@@ -227,7 +227,7 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_add_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
-	//printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
+	printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
 	if (ret < 0) {
 		RTE_LOG(INFO, DPDKLATENCY, "Hash table full for lcore %u - clearing it\n", lcore_id);
 		rte_hash_reset(ipv4_timestamp_lookup_struct[lcore_id]);
@@ -250,7 +250,7 @@ track_latency_synack_v4(uint64_t key, uint64_t *ipv4_timestamp_synack)
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
-	//printf("SYNACK lcore %u, ret: %d \n", lcore_id, ret);
+	printf("SYNACK lcore %u, ret: %d \n", lcore_id, ret);
 	if (ret >= 0 ) {
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		ipv4_timestamp_synack[ret] = CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
@@ -273,7 +273,7 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
 		elapsed_internal = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_synack[ret];
-		//printf("SYN-ACK %d %llu microsec \n", ret, (unsigned long long int) elapsed_external / 1000);
+		printf("SYN-ACK %d %llu microsec \n", ret, (unsigned long long int) elapsed_external / 1000);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ( ((elapsed_internal / 1000000) < 9999) && ((elapsed_external / 1000000) < 9999)){
 			send_to_zmq_ipv4(destip, sourceip, 
@@ -580,9 +580,9 @@ dpdklatency_processing_loop(void)
 
 			/* Reading from RX queue */
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-			//if (nb_rx > 0){
-			//	printf("reading from portid %u, queueid %u\n", portid, queueid);
-			//}
+			if (nb_rx > 0){
+				printf("reading from portid %u, queueid %u\n", portid, queueid);
+			}
 			lcore_statistics[lcore_id].rx += nb_rx;
 
 			for (j = 0; j < nb_rx; j++) {
@@ -1006,7 +1006,7 @@ main(int argc, char **argv)
 	if (dpdklatency_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 
-	nb_ports = rte_eth_dev_count();
+	nb_ports = rte_eth_dev_count_avail();
 	if (nb_ports == 0)
 		rte_exit(EXIT_FAILURE, "No Ethernet ports - bye\n");
 
