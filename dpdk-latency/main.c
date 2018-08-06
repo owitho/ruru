@@ -37,6 +37,7 @@
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_tcp.h>
+#include <rte_net.h>
 #include <rte_ethdev.h>
 #include <rte_mempool.h>
 #include <rte_mbuf.h>
@@ -325,22 +326,21 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_t
 	struct ether_hdr *eth_hdr;
 	struct tcp_hdr *tcp_hdr = NULL;
 	struct ipv4_hdr* ipv4_hdr;
-	uint16_t offset = 0;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint64_t key;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 
-	//VLAN tagged frame
-	if (eth_hdr->ether_type == rte_cpu_to_be_16(ETHER_TYPE_VLAN)){
-        	offset = get_vlan_offset(eth_hdr, &eth_hdr->ether_type);
+	/* ignore non-ipv4 packets (including vlan) */
+	if (eth_hdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
+		return;
 	}
 	
 	// IPv4	
-	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr)+offset);
+	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr));
 	if (ipv4_hdr->next_proto_id == IPPROTO_TCP){
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, 
-			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + offset);
+			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 		printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		
 		switch (tcp_hdr->tcp_flags){ 
@@ -359,7 +359,8 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_t
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
 					ipv4_timestamp_syn,
 					ipv4_timestamp_synack);
-		}	
+		}
+		printf("done processing tcp packet\n");
 	}
 }
 
