@@ -267,11 +267,11 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	double elapsed_external;
 	int ret = 0;
 
-	pringtf("start processing tcp ack\n");
+	printf("start processing tcp ack\n");
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
-	printf("hash lookup: %d", ret);
+	printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
