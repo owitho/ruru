@@ -267,9 +267,11 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	double elapsed_external;
 	int ret = 0;
 
+	pringtf("start processing tcp ack\n");
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
+	printf("hash lookup: %d", ret);
 	if (ret >= 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
@@ -349,7 +351,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_t
 				track_latency_syn_v4( key, ipv4_timestamp_syn);
 				break;
 			case SYN_FLAG | ACK_FLAG:
-				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack)- 1);
+				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack) - 1);
 				track_latency_synack_v4( key, ipv4_timestamp_synack);
 				break;	
 			case ACK_FLAG:
