@@ -742,7 +742,7 @@ dpdklatency_parse_args(int argc, char **argv)
 				dpdklatency_usage(prgname);
 				return -1;
 			}
-			b]reak;
+			break;
 
 		/* timer period */
 		case 'T':
