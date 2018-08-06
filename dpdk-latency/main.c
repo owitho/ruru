@@ -343,7 +343,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_t
 	if (ipv4_hdr->next_proto_id == IPPROTO_TCP){
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, 
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
-		printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
+		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG:
