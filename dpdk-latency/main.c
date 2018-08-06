@@ -890,7 +890,7 @@ init_hash(void)
 	int socketid = 0;
 	unsigned lcore_id;
 
-	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+	RTE_LCORE_FOREACH(lcore_id) {
 		if (rte_lcore_is_enabled(lcore_id) == 0)
 			continue;
 
