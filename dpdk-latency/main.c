@@ -280,7 +280,7 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
 		elapsed_internal = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_synack[ret];
-		printf("SYN-ACK %d %llu microsecs \n", ret, (unsigned long long int) elapsed_external / 1000);
+		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed_external / 1000, sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ( ((elapsed_internal / 1000000) < 9999) && ((elapsed_external / 1000000) < 9999)){
 			send_to_zmq_ipv4(destip, sourceip, 
