@@ -232,7 +232,7 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 	if (ret < 0) {
 		RTE_LOG(INFO, DPDKLATENCY, "Hash table full for lcore %u - clearing it\n", lcore_id);
 		rte_hash_reset(ipv4_timestamp_lookup_struct[lcore_id]);
-		ret = rte_hash_add_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
+		ret = rte_hash_add_key(ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 		if (ret < 0) {
 			rte_exit(EXIT_FAILURE, "Unable to add SYN timestamp to hash after cleaning it");
 		}
@@ -267,8 +267,8 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	double elapsed_external;
 	int ret = 0;
 
-	printf("start processing tcp ack\n");
 	lcore_id = rte_lcore_id();
+	printf("start processing tcp ack on lcore %d\n", lcore_id);
 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	printf("hash lookup: %d\n", ret);
