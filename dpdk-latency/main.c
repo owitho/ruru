@@ -208,10 +208,10 @@ send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int time
 	snprintf(message, sizeof(message), "LAT-%08x-%08x-%010llu-%010llu-", 
 		(unsigned) sourceip, (unsigned) destip, timestamp_ext, timestamp_int);
 
-	// if (debug){
+	if (debug){
 		printf("%s\n", message);
 		fflush(stdout);
-	// }
+	}
 	if (zmq_client != NULL){
 		zmq_send (zmq_client, message, sizeof(message), 0);
 	}
