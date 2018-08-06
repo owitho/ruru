@@ -208,10 +208,10 @@ send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int time
 	snprintf(message, sizeof(message), "LAT-%08x-%08x-%010llu-%010llu-", 
 		(unsigned) sourceip, (unsigned) destip, timestamp_ext, timestamp_int);
 
-	if (debug){
+	// if (debug){
 		printf("%s\n", message);
 		fflush(stdout);
-	}
+	// }
 	if (zmq_client != NULL){
 		zmq_send (zmq_client, message, sizeof(message), 0);
 	}
@@ -228,7 +228,9 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_add_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
-	printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
+	if (debug) {
+		printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
+	}
 	if (ret < 0) {
 		RTE_LOG(INFO, DPDKLATENCY, "Hash table full for lcore %u - clearing it\n", lcore_id);
 		rte_hash_reset(ipv4_timestamp_lookup_struct[lcore_id]);
@@ -251,7 +253,9 @@ track_latency_synack_v4(uint64_t key, uint64_t *ipv4_timestamp_synack)
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
-	printf("SYNACK lcore %u, ret: %d \n", lcore_id, ret);
+	if (debug) {
+		printf("SYNACK lcore %u, ret: %d \n", lcore_id, ret);
+	}
 	if (ret >= 0 ) {
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		ipv4_timestamp_synack[ret] = CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
@@ -276,7 +280,7 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
 		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
 		elapsed_internal = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_synack[ret];
-		printf("SYN-ACK %d %llu microsec \n", ret, (unsigned long long int) elapsed_external / 1000);
+		printf("SYN-ACK %d %llu microsecs \n", ret, (unsigned long long int) elapsed_external / 1000);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ( ((elapsed_internal / 1000000) < 9999) && ((elapsed_external / 1000000) < 9999)){
 			send_to_zmq_ipv4(destip, sourceip, 
