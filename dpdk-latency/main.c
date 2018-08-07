@@ -328,6 +328,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		tcp_seg_len = ipv4_hdr->total_length - (ipv4_hdr->version_ihl & 0x0f) - tcp_hdr->data_off;
+		printf("seglen %u = %u - %u - %u\n", tcp_seg_len, ipv4_hdr->total_length, ipv4_hdr->version_ihl & 0x0f, tcp_hdr->data_off);
 		
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG | ACK_FLAG:
