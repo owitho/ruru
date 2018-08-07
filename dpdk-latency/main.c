@@ -52,6 +52,10 @@ static volatile bool force_quit;
 /* Debug mode */
 static int debug = 0;
 
+#ifndef RTE_MAX_LCORE
+#define RTE_MAX_LCORE 4
+#endif
+
 #define RTE_LOGTYPE_DPDKLATENCY RTE_LOGTYPE_USER1
 
 #define NB_MBUF   8192
@@ -93,11 +97,6 @@ static const struct rte_eth_conf port_conf = {
 	.rxmode = {
 		.mq_mode    = ETH_MQ_RX_RSS, /**< RSS enables */
 		.split_hdr_size = 0,
-		.header_split   = 0, /**< Header Split disabled */
-		.hw_ip_checksum = 0, /**< IP checksum offload disabled */
-		.hw_vlan_filter = 0, /**< VLAN filtering disabled */
-		.jumbo_frame    = 0, /**< Jumbo Frame Support disabled */
-		.hw_strip_crc   = 0, /**< CRC stripped by hardware */
 	},
 	.rx_adv_conf = {
 		.rss_conf = {
@@ -172,8 +171,6 @@ struct lcore_conf {
 } __rte_cache_aligned;
 
 static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
-
-static const char* publishto;
 
 static void
 send_data_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
@@ -469,16 +466,13 @@ static int
 dpdklatency_parse_ip(const char *q_arg)
 {
 	int i;
-	publishto = q_arg;
-	// very simple checks: parameter is not null and it contains a . (e.g., 10.0.0.1)
+    // very simple checks: parameter is not null and it contains a . (e.g., 10.0.0.1)
 	if (q_arg == NULL){
-		publishto = NULL;
-		return -1;
+        return -1;
 	}
 	for (i=0; q_arg[i]; q_arg[i]=='.' ? i++ : *q_arg++);
 	if (i != 3){
-		publishto = NULL;
-		return -1;
+        return -1;
 	}
 	return 0;
 }
@@ -557,11 +551,11 @@ dpdklatency_parse_portmask(const char *portmask)
 	return pm;
 }
 
-static int
+static long
 dpdklatency_parse_timer_period(const char *q_arg)
 {
 	char *end = NULL;
-	int n;
+	long n;
 
 	/* parse number string */
 	n = strtol(q_arg, &end, 10);
@@ -577,13 +571,13 @@ dpdklatency_parse_timer_period(const char *q_arg)
 static int
 dpdklatency_parse_args(int argc, char **argv)
 {
-	int opt, ret, timer_secs;
-	char **argvopt;
+	int opt, ret;
+    long timer_secs;
+    char **argvopt;
 	int option_index;
 	char *prgname = argv[0];
 	static struct option lgopts[] = {
 		{ "config", 1, 0, 0},
-		{ "publishto", 1, 0, 0},
 		{ "debug", no_argument, &debug, 1},
 		{NULL, 0, 0, 0}
 	};
@@ -596,7 +590,7 @@ dpdklatency_parse_args(int argc, char **argv)
 		switch (opt) {
 		/* portmask */
 		case 'p':
-			dpdklatency_enabled_port_mask = dpdklatency_parse_portmask(optarg);
+			dpdklatency_enabled_port_mask = (uint32_t) dpdklatency_parse_portmask(optarg);
 			if (dpdklatency_enabled_port_mask == 0) {
 				printf("invalid portmask\n");
 				dpdklatency_usage(prgname);
@@ -612,7 +606,7 @@ dpdklatency_parse_args(int argc, char **argv)
 				dpdklatency_usage(prgname);
 				return -1;
 			}
-			timer_period = timer_secs;
+			timer_period = (uint64_t) timer_secs;
 			break;
 
 		/* output file */
@@ -626,14 +620,6 @@ dpdklatency_parse_args(int argc, char **argv)
 				ret = dpdklatency_parse_config(optarg);
 				if (ret) {
 					printf("invalid config\n");
-					dpdklatency_usage(prgname);
-					return -1;
-				}
-			}
-			if (!strncmp(lgopts[option_index].name, "publishto", 9)) {
-				ret = dpdklatency_parse_ip(optarg);
-				if (ret) {
-					printf("invalid publishto\n");
 					dpdklatency_usage(prgname);
 					return -1;
 				}
