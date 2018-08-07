@@ -5,6 +5,7 @@
         "rte_launch.h": "c",
         "stdio.h": "c",
         "rte_cuckoo_hash.h": "c",
-        "rte_hash.h": "c"
+        "rte_hash.h": "c",
+        "rte_string_fns.h": "c"
     }
 }

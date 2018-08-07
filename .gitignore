@@ -10,3 +10,5 @@ analytics_header/analytics_header
 *.swp
 asn.db
 proxy.db
+CMakeLists.txt
+.vscode/

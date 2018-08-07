@@ -44,8 +44,8 @@
 #include <rte_mbuf.h>
 #include <rte_hash.h>
 #include <rte_errno.h>
-#include <zmq.h>
-	
+#include <rte_string_fns.h>
+
 
 static volatile bool force_quit;
 
@@ -78,7 +78,6 @@ struct mbuf_table {
 };
 
 #define MAX_RX_QUEUE_PER_LCORE 16
-#define MAX_TX_QUEUE_PER_PORT 16
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 
@@ -169,11 +168,7 @@ static uint16_t nb_lcore_params = sizeof(lcore_params_array_default) /
 struct lcore_conf {
 	uint16_t n_rx_queue;
 	struct lcore_rx_queue rx_queue_list[MAX_RX_QUEUE_PER_LCORE];
-	uint16_t tx_queue_id[RTE_MAX_ETHPORTS];
 	struct mbuf_table tx_mbufs[RTE_MAX_ETHPORTS];
-	void * zmq_client;
-	void * zmq_client_header;
-	lookup_struct_t * ipv4_lookup_struct;
 } __rte_cache_aligned;
 
 static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
@@ -181,12 +176,8 @@ static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
 static const char* publishto;
 
 static void
-send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
+send_data_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
 {
-	unsigned lcore_id = rte_lcore_id();
-	struct lcore_conf *qconf;
-	qconf = &lcore_conf[lcore_id];
-	void *zmq_client = qconf->zmq_client;
 	//message length is 28 bytes!
 	char message[3+1+8+1+8+1+10+2];
 
@@ -197,9 +188,7 @@ send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int time
 		printf("%s\n", message);
 		fflush(stdout);
 	}
-	if (zmq_client != NULL){
-		zmq_send (zmq_client, message, sizeof(message), 0);
-	}
+	// TODO send data
 }
 
 
@@ -247,7 +236,7 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed / 1000, sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ((elapsed / 1000000) < 9999){
-			send_to_zmq_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000);
+			send_data_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000);
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
@@ -277,7 +266,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, 
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
-		tcp_seg_len = rte_be_to_cpu_16(ipv4_hdr->total_length) - ((ipv4_hdr->version_ihl & 0x0f) << 2) - (tcp_hdr->data_off >> 4 << 2);
+		tcp_seg_len = (uint16_t) (rte_be_to_cpu_16(ipv4_hdr->total_length) - ((ipv4_hdr->version_ihl & 0x0f) << 2) - (tcp_hdr->data_off >> 4 << 2));
 		// printf("seglen %u = %u - %u - %u\n", tcp_seg_len, rte_be_to_cpu_16(ipv4_hdr->total_length), ((ipv4_hdr->version_ihl & 0x0f) << 2), (tcp_hdr->data_off >> 4 << 2));
 		// printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 		
@@ -296,6 +285,9 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
 					ipv4_timestamp_syn);
+				break;
+            default:
+                break;
 		}
 	}
 }
@@ -322,30 +314,6 @@ dpdklatency_send_burst(struct lcore_conf *qconf, unsigned n, uint8_t port)
 		} while (++ret < n);
 	}
 
-	return 0;
-}
-
-/* Enqueue packets for TX and prepare them to be sent */
-static int
-dpdklatency_send_packet(struct rte_mbuf *m, uint8_t port)
-{
-	unsigned lcore_id, len;
-	struct lcore_conf *qconf;
-
-	lcore_id = rte_lcore_id();
-
-	qconf = &lcore_conf[lcore_id];
-	len = qconf->tx_mbufs[port].len;
-	qconf->tx_mbufs[port].m_table[len] = m;
-	len++;
-
-	/* enough pkts to be sent */
-	if (unlikely(len == MAX_PKT_BURST)) {
-		dpdklatency_send_burst(qconf, MAX_PKT_BURST, port);
-		len = 0;
-	}
-
-	qconf->tx_mbufs[port].len = len;
 	return 0;
 }
 
@@ -393,36 +361,6 @@ print_stats(void)
 	printf("\n====================================================\n");
 }
 
-static void
-init_zmq_for_lcore(unsigned lcore_id){
-	void *context = zmq_ctx_new ();
-	void *requester = zmq_socket (context, ZMQ_PUB);
-	void *requester_headers = zmq_socket (context, ZMQ_PUB);
-	char hostname[28]; 
-	int rc;
-
-	if (lcore_id > 99){
-		rte_exit(EXIT_FAILURE, "Lcore %u is out of range", lcore_id);
-	}
-
-	//Starting port: 5550, 5551, 5552, etc.
-	if (publishto == NULL){
-		snprintf(hostname, 21, "tcp://127.0.0.1:55%.2d", lcore_id);	
-		printf("Setting up ZMQ from lcore %u on socket %s %lu \n", lcore_id, hostname, sizeof(hostname));
-		rc = zmq_bind (requester, hostname);
-	} else {
-		snprintf(hostname, 28, "tcp://%s:55%.2d", publishto, lcore_id);	
-		printf("Connecting ZMQ from lcore %u to publish to socket %s %lu \n", lcore_id, hostname, sizeof(hostname));
-		rc = zmq_connect (requester, hostname);
-	}
-	
-	if (rc != 0 || requester == NULL) {
-		rte_exit(EXIT_FAILURE, "Unable to create zmq connection on lcore %u . Issue: %s", lcore_id, zmq_strerror (errno));
-	}	
-	
-	lcore_conf[lcore_id].zmq_client = requester;
-}
-
 /* packet processing loop */
 static void
 dpdklatency_processing_loop(void)
@@ -446,9 +384,6 @@ dpdklatency_processing_loop(void)
 		RTE_LOG(INFO, DPDKLATENCY, "lcore %u has nothing to do - no RX queue assigned\n", lcore_id);
 		return;
 	}
-
-	/* Init ZMQ */
-	init_zmq_for_lcore(lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 		portid = qconf->rx_queue_list[i].port_id;
@@ -519,16 +454,16 @@ dpdklatency_processing_loop(void)
 static void
 dpdklatency_usage(const char *prgname)
 {
-	printf("%s [EAL options] -- -p PORTMASK [-q NQ] [-T PERIOD] [--config (port, queue, lcore)] [--publishto IP] [--debug]\n"
+	printf("%s [EAL options] -- -p PORTMASK [-q NQ] [-T PERIOD] [-o FILENAME] [--config (port, queue, lcore)] [--publishto IP] [--debug]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
+	       "  -o FILENAME: write output to file\n"
 	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
 	       " --config (port,queue,lcore)[,(port,queue,lcore)]\n"
 	       " --publishto IP: publish to a specific IP (where analytics is running). If not specified, this program binds.\n"
 	       " --debug: shows captured flows\n",
 	       prgname);
 }
-
 
 static int
 dpdklatency_parse_ip(const char *q_arg)
@@ -655,7 +590,7 @@ dpdklatency_parse_args(int argc, char **argv)
 
 	argvopt = argv;
 
-	while ((opt = getopt_long(argc, argvopt, "p:q:T:",
+	while ((opt = getopt_long(argc, argvopt, "p:q:T:o:",
 				  lgopts, &option_index)) != EOF) {
 
 		switch (opt) {
@@ -678,6 +613,11 @@ dpdklatency_parse_args(int argc, char **argv)
 				return -1;
 			}
 			timer_period = timer_secs;
+			break;
+
+		/* output file */
+		case 'o':
+			// TODO
 			break;
 
 		/* long options */
@@ -827,14 +767,13 @@ init_hash(void)
 		setup_hash(lcore_id);
 
 		qconf = &lcore_conf[lcore_id];
-		qconf->ipv4_lookup_struct = ipv4_timestamp_lookup_struct[lcore_id];
 	}
 	return 0;
 }
 
 
-static uint8_t
-get_port_n_rx_queues(const uint8_t port)
+static uint16_t
+get_port_n_rx_queues(const uint16_t port)
 {
 	int queue = -1;
 	uint16_t i;
@@ -844,7 +783,7 @@ get_port_n_rx_queues(const uint8_t port)
 				lcore_params[i].queue_id > queue)
 			queue = lcore_params[i].queue_id;
 	}
-	return (uint8_t)(++queue);
+	return (uint16_t) ++queue;
 }
 
 static int
@@ -876,9 +815,8 @@ main(int argc, char **argv)
 {
 	struct lcore_conf *qconf;
 	int ret;
-	uint8_t nb_ports, nb_rx_queue;
-	uint8_t nb_ports_available;
-	uint8_t portid, queueid, queue;
+	uint16_t nb_ports, nb_ports_available, portid, nb_rx_queue;
+	uint8_t queueid, queue;
 	char *publish_host;
 	unsigned lcore_id;
 
