@@ -172,20 +172,25 @@ struct lcore_conf {
 
 static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
 
+FILE * output_file = NULL;
+
 static void
 send_data_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
 {
 	//message length is 28 bytes!
-	char message[3+1+8+1+8+1+10+2];
+	char message[6+1+8+1+8+1+10+2];
 
-	snprintf(message, sizeof(message), "LAT-%08x-%08x-%010llu-%010llu-", 
+	snprintf(message, sizeof(message), "RTTTCP\t%08x\t%08x\t%010llu\t%010llu\n",
 		(unsigned) sourceip, (unsigned) destip, timestamp);
 
-	if (debug){
-		printf("%s\n", message);
+	if (unlikely(debug)){
+		printf("%s", message);
 		fflush(stdout);
 	}
-	// TODO send data
+
+	if (output_file != NULL) {
+	    fputs(message, output_file);
+	}
 }
 
 
@@ -199,7 +204,7 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 	lcore_id = rte_lcore_id();
 
 	ret = rte_hash_add_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
-	if (debug) {
+	if (unlikely(debug)) {
 		printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
 	}
 	if (ret < 0) {
@@ -428,7 +433,7 @@ dpdklatency_processing_loop(void)
 
 			/* Reading from RX queue */
 			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-			if (debug && nb_rx > 0) {
+			if (unlikely(debug && nb_rx > 0)) {
 				printf("reading from portid %u, queueid %u, nb_rx %u\n", portid, queueid, nb_rx);
 			}
 			lcore_statistics[lcore_id].rx += nb_rx;
@@ -596,7 +601,15 @@ dpdklatency_parse_args(int argc, char **argv)
 
 		/* output file */
 		case 'o':
-			// TODO
+		    if (optarg[0] == '-' && optarg[1] == '\0') {
+		        output_file = stdout;
+		    } else {
+                output_file = fopen(optarg, "a");
+                if (output_file == NULL) {
+                    printf("open file failed: %s\n", optarg);
+                    return -1;
+                }
+            }
 			break;
 
 		/* long options */
