@@ -48,9 +48,6 @@
 
 static volatile bool force_quit;
 
-/* Disabling forwarding */
-static int forwarding = 0;
-
 /* Debug mode */
 static int debug = 0;
 
@@ -183,19 +180,6 @@ static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
 static const char* publishto;
 
 static void
-send_header_zmq_ipv4(uint8_t * alldata, uint32_t length)
-{
-	unsigned lcore_id = rte_lcore_id();
-	struct lcore_conf *qconf;
-	qconf = &lcore_conf[lcore_id];
-	void *zmq_client = qconf->zmq_client_header;
-
-	if (zmq_client != NULL){
-		zmq_send (zmq_client, alldata, length, 0);
-	}
-}
-
-static void
 send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
 {
 	unsigned lcore_id = rte_lcore_id();
@@ -266,41 +250,6 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
-}
-
-
-/* For vlan tagged packets, we need to find the offset in order to remove tagging */
-static inline size_t
-get_vlan_offset(struct ether_hdr *eth_hdr, uint16_t *proto)
-{
-        size_t vlan_offset = 0;
-        if (rte_cpu_to_be_16(ETHER_TYPE_VLAN) == *proto) {
-                struct vlan_hdr *vlan_hdr = (struct vlan_hdr *)(eth_hdr + 1);
-                vlan_offset = sizeof(struct vlan_hdr);
-                *proto = vlan_hdr->eth_proto;
-                if (rte_cpu_to_be_16(ETHER_TYPE_VLAN) == *proto) {
-                        vlan_hdr = vlan_hdr + 1;
-                        *proto = vlan_hdr->eth_proto;
-                        vlan_offset += sizeof(struct vlan_hdr);
-                }
-        }
-        return vlan_offset;
-}
-
-
-/* This function is streaming TCP headers (with options) on ZMQ sockets */
-static int
-send_tcpoptions(struct tcp_hdr *tcp_hdr)
-{
-	uint32_t length = (tcp_hdr->data_off & 0xf0) >> 2;
-	uint8_t alldata[length];
-
-	memcpy(alldata, tcp_hdr, length); 
-	send_header_zmq_ipv4(alldata, length);	
-
-	//printf("len: %u\n", length);
-	//fflush(stdout);
-	return 0;
 }
 
 static void
@@ -557,14 +506,8 @@ dpdklatency_processing_loop(void)
 
 				// Call the latency tracker function for every packet
 				track_latency(m, ipv4_timestamp_syn);
-
-				/* Forward packets if forwarding is enabled */	
-				if (forwarding){
-					dpdklatency_send_packet(m, (uint8_t) !portid);
-				} else {
-					// drop it like it's hot
-					rte_pktmbuf_free(m);	
-				}
+				// drop it like it's hot
+				rte_pktmbuf_free(m);
 			}
 		}
 	}
@@ -574,15 +517,13 @@ dpdklatency_processing_loop(void)
 static void
 dpdklatency_usage(const char *prgname)
 {
-	printf("%s [EAL options] -- -p PORTMASK [-q NQ] [-T PERIOD] [--config (port, queue, lcore)] [--publishto IP] [--debug] [--forwarding]\n"
+	printf("%s [EAL options] -- -p PORTMASK [-q NQ] [-T PERIOD] [--config (port, queue, lcore)] [--publishto IP] [--debug]\n"
 	       "  -p PORTMASK: hexadecimal bitmask of ports to configure\n"
 	       "  -q NQ: number of queue (=ports) per lcore (default is 1)\n"
 	       "  -T PERIOD: statistics will be refreshed each PERIOD seconds (0 to disable, 10 default, 86400 maximum)\n"
 	       " --config (port,queue,lcore)[,(port,queue,lcore)]\n"
 	       " --publishto IP: publish to a specific IP (where analytics is running). If not specified, this program binds.\n"
-	       " --debug: shows captured flows\n"
-	       "  --[no-]forwarding: Enable or disable forwarding (disabled by default)\n"
-               "      When enabled, the app forwards packets between port 0 and 1:\n",
+	       " --debug: shows captured flows\n",
 	       prgname);
 }
 
@@ -707,8 +648,6 @@ dpdklatency_parse_args(int argc, char **argv)
 		{ "config", 1, 0, 0},
 		{ "publishto", 1, 0, 0},
 		{ "debug", no_argument, &debug, 1},
-		{ "forwarding", no_argument, &forwarding, 1},
-		{ "no-forwarding", no_argument, &forwarding, 0},
 		{NULL, 0, 0, 0}
 	};
 
@@ -1074,12 +1013,7 @@ main(int argc, char **argv)
 	/* launch processing loop on all core */
 	rte_eal_mp_remote_launch((lcore_function_t *) dpdklatency_processing_loop, NULL, CALL_MASTER);
 
-	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
-		if (rte_eal_wait_lcore(lcore_id) < 0) {
-                        return -1;
-		}
-		//TODO: free zmq things
-	}
+	rte_eal_mp_wait_lcore();
 
 	for (portid = 0; portid < nb_ports; portid++) {
 		if ((dpdklatency_enabled_port_mask & (1 << portid)) == 0)
