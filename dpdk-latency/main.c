@@ -196,17 +196,17 @@ send_header_zmq_ipv4(uint8_t * alldata, uint32_t length)
 }
 
 static void
-send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp_ext, unsigned long long int timestamp_int)
+send_to_zmq_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
 {
 	unsigned lcore_id = rte_lcore_id();
 	struct lcore_conf *qconf;
 	qconf = &lcore_conf[lcore_id];
 	void *zmq_client = qconf->zmq_client;
 	//message length is 28 bytes!
-	char message[3+1+8+1+8+1+10+1+10+2];
+	char message[3+1+8+1+8+1+10+2];
 
 	snprintf(message, sizeof(message), "LAT-%08x-%08x-%010llu-%010llu-", 
-		(unsigned) sourceip, (unsigned) destip, timestamp_ext, timestamp_int);
+		(unsigned) sourceip, (unsigned) destip, timestamp);
 
 	if (debug){
 		printf("%s\n", message);
@@ -244,31 +244,11 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 }
 
 static void
-track_latency_synack_v4(uint64_t key, uint64_t *ipv4_timestamp_synack)
-{
-	int ret = 0;
-	unsigned lcore_id;
-	struct timespec timestamp;
-
-	lcore_id = rte_lcore_id();
-
-	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
-	if (debug) {
-		printf("SYNACK lcore %u, ret: %d \n", lcore_id, ret);
-	}
-	if (ret >= 0 ) {
-		clock_gettime(CLOCK_MONOTONIC, &timestamp);
-		ipv4_timestamp_synack[ret] = CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
-	}
-}
-
-static void
-track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_timestamp_synack)
+track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t *ipv4_timestamp_syn)
 {
 	unsigned lcore_id;
 	struct timespec timestamp;
-	double elapsed_internal;
-	double elapsed_external;
+	double elapsed;
 	int ret = 0;
 
 	lcore_id = rte_lcore_id();
@@ -278,14 +258,11 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
 		clock_gettime(CLOCK_MONOTONIC, &timestamp);
-		elapsed_external = ipv4_timestamp_synack[ret] - ipv4_timestamp_syn[ret];
-		elapsed_internal = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_synack[ret];
-		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed_external / 1000, sourceip, destip);
+		elapsed = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_syn[ret];
+		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed / 1000, sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
-		if ( ((elapsed_internal / 1000000) < 9999) && ((elapsed_external / 1000000) < 9999)){
-			send_to_zmq_ipv4(destip, sourceip, 
-					(unsigned long long int) elapsed_external / 1000, 
-					(unsigned long long int) elapsed_internal / 1000);
+		if ((elapsed / 1000000) < 9999){
+			send_to_zmq_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000);
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
@@ -327,7 +304,7 @@ send_tcpoptions(struct tcp_hdr *tcp_hdr)
 }
 
 static void
-track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_timestamp_synack)
+track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 {
 	struct ether_hdr *eth_hdr;
 	struct tcp_hdr *tcp_hdr = NULL;
@@ -351,20 +328,19 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn, uint64_t *ipv4_t
 		
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG:
-				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq);
-				track_latency_syn_v4( key, ipv4_timestamp_syn);
+				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + 1);
+				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
-			case SYN_FLAG | ACK_FLAG:
-				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack) - 1);
-				track_latency_synack_v4( key, ipv4_timestamp_synack);
-				break;	
+			case SYN_FLAG | PSH_FLAG:
+				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_hdr->data_off);
+				track_latency_syn_v4(key, ipv4_timestamp_syn);
+				break;
 			case ACK_FLAG:
-				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) - 1 );
-				track_latency_ack_v4( key,
+				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq));
+				track_latency_ack_v4(key,
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
-					ipv4_timestamp_syn,
-					ipv4_timestamp_synack);
+					ipv4_timestamp_syn);
 		}
 	}
 }
@@ -504,7 +480,6 @@ dpdklatency_processing_loop(void)
 	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
 	uint64_t ipv4_timestamp_syn[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
-	uint64_t ipv4_timestamp_synack[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
 
 	prev_tsc = 0;
 	timer_tsc = 0;
@@ -576,7 +551,7 @@ dpdklatency_processing_loop(void)
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 
 				// Call the latency tracker function for every packet
-				track_latency(m, ipv4_timestamp_syn, ipv4_timestamp_synack);
+				track_latency(m, ipv4_timestamp_syn);
 
 				/* Forward packets if forwarding is enabled */	
 				if (forwarding){
