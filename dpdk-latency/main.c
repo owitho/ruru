@@ -330,17 +330,17 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + 1);
-				printf("SYNACK lcore %u seq %u\n", lcore_id, tcp_hdr->sent_seq);
+				printf("SYNACK lcore %u hash %x seq %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG | PSH_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_hdr->data_off);
-				printf("PSHACK lcore %u seq %u off %u\n", lcore_id, tcp_hdr->sent_seq, tcp_hdr->data_off);
+				printf("PSHACK lcore %u hash %x seq %u off %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->data_off);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
-				printf("ACK lcore %u ack %u\n", lcore_id, tcp_hdr->recv_ack);
+				printf("ACK lcore %u hash %x ack %u\n", lcore_id, m->hash.rss, tcp_hdr->recv_ack);
 				track_latency_ack_v4(key,
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
