@@ -311,6 +311,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 	struct ipv4_hdr* ipv4_hdr;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint64_t key;
+	unsigned lcore_id = rte_lcore_id();
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 
@@ -329,17 +330,17 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + 1);
-				printf("SYNACK seq %u\n", tcp_hdr->sent_seq);
+				printf("SYNACK lcore %u seq %u\n", lcore_id, tcp_hdr->sent_seq);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG | PSH_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_hdr->data_off);
-				printf("PSHACK seq %u off %u\n", tcp_hdr->sent_seq, tcp_hdr->data_off);
+				printf("PSHACK lcore %u seq %u off %u\n", lcore_id, tcp_hdr->sent_seq, tcp_hdr->data_off);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
-				printf("ACK ack %u\n", tcp_hdr->recv_ack);
+				printf("ACK lcore %u ack %u\n", lcore_id, tcp_hdr->recv_ack);
 				track_latency_ack_v4(key,
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
