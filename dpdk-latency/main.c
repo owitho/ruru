@@ -329,21 +329,19 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		tcp_seg_len = rte_be_to_cpu_16(ipv4_hdr->total_length) - ((ipv4_hdr->version_ihl & 0x0f) << 2) - (tcp_hdr->data_off >> 4 << 2);
 		// printf("seglen %u = %u - %u - %u\n", tcp_seg_len, rte_be_to_cpu_16(ipv4_hdr->total_length), ((ipv4_hdr->version_ihl & 0x0f) << 2), (tcp_hdr->data_off >> 4 << 2));
+		// printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 		
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) + 1);
-				printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG | PSH_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) + tcp_seg_len);
-				printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
-				printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 				track_latency_ack_v4(key,
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
