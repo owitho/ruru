@@ -511,7 +511,7 @@ dpdklatency_processing_loop(void)
 				rte_pktmbuf_free(m);
 			}
 		}
-		usleep(10000);
+		usleep(1000);
 	}
 }
 
