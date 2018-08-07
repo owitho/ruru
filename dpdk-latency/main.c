@@ -463,21 +463,6 @@ dpdklatency_usage(const char *prgname)
 }
 
 static int
-dpdklatency_parse_ip(const char *q_arg)
-{
-	int i;
-    // very simple checks: parameter is not null and it contains a . (e.g., 10.0.0.1)
-	if (q_arg == NULL){
-        return -1;
-	}
-	for (i=0; q_arg[i]; q_arg[i]=='.' ? i++ : *q_arg++);
-	if (i != 3){
-        return -1;
-	}
-	return 0;
-}
-
-static int
 dpdklatency_parse_config(const char *q_arg)
 {
 	char s[256];
