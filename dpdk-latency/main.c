@@ -310,6 +310,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 	struct tcp_hdr *tcp_hdr = NULL;
 	struct ipv4_hdr* ipv4_hdr;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
+	uint16_t tcp_seg_len;
 	uint64_t key;
 	unsigned lcore_id = rte_lcore_id();
 
@@ -326,21 +327,22 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, 
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
+		tcp_seg_len = ipv4_hdr->total_length - (ipv4_hdr->version_ihl & 0x0f) - tcp_hdr->data_off;
 		
 		switch (tcp_hdr->tcp_flags){ 
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + 1);
-				printf("SYNACK lcore %u hash %x seq %u ack %u off %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_hdr->data_off);
+				printf("SYNACK lcore %u hash %x seq %u ack %u seglen %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_seg_len);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG | PSH_FLAG:
-				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_hdr->data_off);
-				printf("PSHACK lcore %u hash %x seq %u ack %u off %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_hdr->data_off);
+				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_seg_len);
+				printf("PSHACK lcore %u hash %x seq %u ack %u seglen %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_seg_len);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
-				printf("ACK    lcore %u hash %x seq %u ack %u off %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_hdr->data_off);
+				printf("ACK    lcore %u hash %x seq %u ack %u seglen %u\n", lcore_id, m->hash.rss, tcp_hdr->sent_seq, tcp_hdr->recv_ack, tcp_seg_len);
 				track_latency_ack_v4(key,
 					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
 					rte_be_to_cpu_32(ipv4_hdr->src_addr),
