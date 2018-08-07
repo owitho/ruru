@@ -177,10 +177,9 @@ FILE * output_file = NULL;
 static void
 send_data_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
 {
-	//message length is 28 bytes!
 	char message[6+1+8+1+8+1+10+2];
 
-	snprintf(message, sizeof(message), "RTTTCP\t%08x\t%08x\t%010llu\t%010llu\n",
+	snprintf(message, sizeof(message), "RTTTCP\t%08x\t%08x\t%010llu\n",
 		(unsigned) sourceip, (unsigned) destip, timestamp);
 
 	if (unlikely(debug)){
