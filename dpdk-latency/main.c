@@ -332,7 +332,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 				printf("SYN seq %u\n", tcp_hdr->sent_seq);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
 				break;
-			case SYN_FLAG | PSH_FLAG:
+			case ACK_FLAG | PSH_FLAG:
 				key = (long long) m->hash.rss << 32 | rte_be_to_cpu_32(tcp_hdr->sent_seq + tcp_hdr->data_off);
 				printf("SYNPSH seq %u off %u\n", tcp_hdr->sent_seq, tcp_hdr->data_off);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
