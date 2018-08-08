@@ -293,7 +293,7 @@ track_response_dns(uint64_t key, uint32_t sourceip, uint32_t destip, const uint6
     // printf("hash lookup: %d\n", ret);
     if (ret >= 0) {
         elapsed = monotonic_time_nanosecs() - timestamp_store[ret];
-        printf("DNS QUERY %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
+        printf("DNS QUERY %d %lu microsecs from %08x to %08x id %x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip, dnsInfo->msg_id);
         // limit elapsed time
         if ((elapsed / 1000) < 10000000000L) {
             send_rtt_ipv4("RTTDNS", sourceip, destip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
