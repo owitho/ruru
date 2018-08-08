@@ -389,6 +389,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		}
 
 	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
+
 	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 	    /* recognize dns packet */
 	    if (udp_hdr->src_port == 53 || udp_hdr->dst_port == 53) {
@@ -402,6 +403,8 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
                        dnsInfo.a_record[0], dnsInfo.a_record[1], dnsInfo.a_record[2], dnsInfo.a_record[3],
                        dnsInfo.a_record[4], dnsInfo.a_record[5], dnsInfo.a_record[6], dnsInfo.a_record[7]);
 
+            } else {
+                printf("dns parse error %d\n", ret);
             }
 	    }
 	}
