@@ -181,16 +181,22 @@ inline static void data_output(char * message) {
     }
 }
 
-inline static unsigned long long timestamp_nanosecs()
+inline static uint64_t monotonic_time_nanosecs()
 {
     struct timespec timestamp;
     clock_gettime(CLOCK_MONOTONIC, &timestamp);
-    printf("%lu.%lu\n", timestamp.tv_sec, timestamp.tv_nsec);
-    return (unsigned long long)(CLOCK_PRECISION * timestamp.tv_sec) + timestamp.tv_nsec;
+    return (uint64_t)(CLOCK_PRECISION * timestamp.tv_sec) + timestamp.tv_nsec;
+}
+
+inline static uint64_t timestamp_millisecs()
+{
+    struct timespec timestamp;
+    clock_gettime(CLOCK_REALTIME, &timestamp);
+    return (uint64_t)(1000 * timestamp.tv_sec) + (timestamp.tv_nsec / 1000000);
 }
 
 static void
-send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, unsigned long timestamp_msecs)
+send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, uint64_t timestamp_msecs)
 {
     struct in_addr inaddr;
 	char message[6+1+13+1+15+1+15+1+10+2];
@@ -233,14 +239,14 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 			rte_exit(EXIT_FAILURE, "Unable to add SYN timestamp to hash after cleaning it");
 		}
 	}
-	ipv4_timestamp_syn[ret] = (uint64_t) timestamp_nanosecs();
+	ipv4_timestamp_syn[ret] = (uint64_t) monotonic_time_nanosecs();
 }
 
 static void
 track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uint64_t *ipv4_timestamp_syn)
 {
 	unsigned lcore_id;
-    unsigned long long elapsed, timestamp;
+    unsigned long long elapsed;
 	int ret = 0;
 
 	lcore_id = rte_lcore_id();
@@ -249,12 +255,11 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uin
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
-        timestamp = timestamp_nanosecs();
-        elapsed = timestamp - ipv4_timestamp_syn[ret];
+        elapsed = monotonic_time_nanosecs() - ipv4_timestamp_syn[ret];
 		printf("SYN-ACK %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ((elapsed / 1000) < 10000000000L) {
-            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) (elapsed / 1000), (unsigned long) (timestamp / 1000000));
+            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
