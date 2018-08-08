@@ -317,8 +317,8 @@ parse_dns(u_char * buffer, uint16_t diagram_len, struct dns_info * dnsInfo) {
             dnsInfo->query_name[DNS_MAX_NAME_LEN - 1] = '\0';
         }
 
-        int a_count = 0;
-        for (int i = 0; i < ans_count && a_count < DNS_MAX_A_RECORDS; i++) {
+        int a_count = 0, i = 0;
+        for (; i < ans_count && a_count < DNS_MAX_A_RECORDS; i++) {
             if (ns_parserr(&nsMsg, ns_s_an, i, &rr) != 0) {
                 continue;
             }
