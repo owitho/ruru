@@ -209,7 +209,7 @@ inline static uint64_t timestamp_millisecs()
 }
 
 static void
-send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, uint64_t timestamp_msecs)
+send_rtt_ipv4(char *type, uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, uint64_t timestamp_msecs)
 {
     struct in_addr inaddr;
 	char message[6+1+13+1+15+1+15+1+10+2];
@@ -220,8 +220,8 @@ send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, u
 	inaddr.s_addr = destip;
 	inet_ntop(AF_INET, &inaddr, dst_ip, sizeof(dst_ip));
 
-	snprintf(message, sizeof(message), "RTTTCP\t%13llu\t%s\t%s\t%10llu\n",
-		timestamp_msecs, src_ip, dst_ip, rtt_usecs);
+	snprintf(message, sizeof(message), "%s\t%13llu\t%s\t%s\t%10llu\n",
+		type, timestamp_msecs, src_ip, dst_ip, rtt_usecs);
 
 	if (unlikely(debug)){
 		printf("%s", message);
@@ -233,7 +233,7 @@ send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, u
 
 
 static void
-track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
+track_request(uint64_t key, uint64_t *ipv4_timestamp_syn)
 {
 	int ret = 0;
 	unsigned lcore_id;
@@ -256,7 +256,7 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 }
 
 static void
-track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uint64_t *ipv4_timestamp_syn)
+track_response_tcp_ipv4(uint64_t key, uint32_t sourceip, uint32_t destip, const uint64_t *timestamp_store)
 {
 	unsigned lcore_id;
     unsigned long long elapsed;
@@ -268,30 +268,55 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uin
 	ret = rte_hash_lookup(ipv4_tcp_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
-        elapsed = monotonic_time_nanosecs() - ipv4_timestamp_syn[ret];
-		printf("SYN-ACK %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
+        elapsed = monotonic_time_nanosecs() - timestamp_store[ret];
+		printf("ACK %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
 		// limit elapsed time
 		if ((elapsed / 1000) < 10000000000L) {
-            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
+            send_rtt_ipv4("RTTTCP", sourceip, destip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
 		}
-		rte_hash_del_key (ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
+		rte_hash_del_key(ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
 }
+
+
+static void
+track_response_dns(uint64_t key, uint32_t sourceip, uint32_t destip, const uint64_t *timestamp_store, struct dns_info * dnsInfo)
+{
+    unsigned lcore_id;
+    unsigned long long elapsed;
+    int ret = 0;
+
+    lcore_id = rte_lcore_id();
+    // printf("start processing tcp ack on lcore %d\n", lcore_id);
+
+    ret = rte_hash_lookup(ipv4_tcp_timestamp_lookup_struct[lcore_id], (const void *) &key);
+    // printf("hash lookup: %d\n", ret);
+    if (ret >= 0) {
+        elapsed = monotonic_time_nanosecs() - timestamp_store[ret];
+        printf("DNS QUERY %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
+        // limit elapsed time
+        if ((elapsed / 1000) < 10000000000L) {
+            send_rtt_ipv4("RTTDNS", sourceip, destip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
+        }
+        rte_hash_del_key(ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
+    }
+}
+
 
 static int
 parse_dns(u_char * buffer, uint16_t diagram_len, struct dns_info * dnsInfo) {
     ns_msg nsMsg;
     if (ns_initparse(buffer, diagram_len - 8, &nsMsg) != 0) {
-        return -1;
+        return -1; // parse error
     }
     if (ns_msg_getflag(nsMsg, ns_f_rcode) != ns_r_noerror) {
-        return -2;
+        return -2; // r-code indicates error
     }
     if (ns_msg_getflag(nsMsg, ns_f_opcode) != ns_o_query) {
-        return 1;
+        return 1; // not standard query (e.g. inverse query)
     }
     if (ns_msg_count(nsMsg, ns_s_qd) != 1) {
-        return 2;
+        return 2; // too much query RRs
     }
 
     int ans_count = ns_msg_count(nsMsg, ns_s_an);
@@ -306,7 +331,10 @@ parse_dns(u_char * buffer, uint16_t diagram_len, struct dns_info * dnsInfo) {
     } else { // response
         ns_rr rr;
         if (ns_parserr(&nsMsg, ns_s_qd, 0, &rr) != 0) {
-            return -3;
+            return -3; // RR parse error
+        }
+        if (ns_rr_type(rr) != ns_t_a) {
+            return 4; // not A query
         }
         char * name = ns_rr_name(rr);
         size_t name_len = strlen(name);
@@ -340,7 +368,7 @@ parse_dns(u_char * buffer, uint16_t diagram_len, struct dns_info * dnsInfo) {
 }
 
 static void
-track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
+track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 {
 	struct ether_hdr *eth_hdr;
 	struct tcp_hdr *tcp_hdr = NULL;
@@ -372,18 +400,18 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		switch (tcp_hdr->tcp_flags){
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) + 1);
-				track_latency_syn_v4(key, ipv4_timestamp_syn);
+                track_request(key, timestamp_store);
 				break;
 			case ACK_FLAG | PSH_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) + tcp_seg_len);
-				track_latency_syn_v4(key, ipv4_timestamp_syn);
+                track_request(key, timestamp_store);
 				break;
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
-				track_latency_ack_v4(key,
-                                     ipv4_hdr->dst_addr,
-                                     ipv4_hdr->src_addr,
-                                     ipv4_timestamp_syn);
+                track_response_tcp_ipv4(key,
+                                        ipv4_hdr->dst_addr,
+                                        ipv4_hdr->src_addr,
+                                        timestamp_store);
 				break;
             default:
                 break;
@@ -391,7 +419,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 
 	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
 	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
-        printf("UDP src %d dst %d len %d\n", rte_be_to_cpu_16(udp_hdr->src_port), rte_be_to_cpu_16(udp_hdr->dst_port), rte_be_to_cpu_16(udp_hdr->dgram_len));
+//        printf("UDP src %d dst %d len %d\n", rte_be_to_cpu_16(udp_hdr->src_port), rte_be_to_cpu_16(udp_hdr->dst_port), rte_be_to_cpu_16(udp_hdr->dgram_len));
         /* recognize dns packet */
 	    if (rte_be_to_cpu_16(udp_hdr->src_port) == 53 || rte_be_to_cpu_16(udp_hdr->dst_port) == 53) {
 	        struct dns_info dnsInfo;
@@ -399,10 +427,15 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
                     rte_pktmbuf_mtod_offset(m, u_char *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + sizeof(struct udp_hdr)),
                     rte_be_to_cpu_16(udp_hdr->dgram_len), &dnsInfo);
             if (ret == 0) {
-                // todo
                 printf("msgid %x type %d name %s\n%x %x %x %x\n%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
                        dnsInfo.a_record[0], dnsInfo.a_record[1], dnsInfo.a_record[2], dnsInfo.a_record[3],
                        dnsInfo.a_record[4], dnsInfo.a_record[5], dnsInfo.a_record[6], dnsInfo.a_record[7]);
+                key = (uint64_t) (m->hash.rss << 16u | dnsInfo.msg_id);
+                if (dnsInfo.qr_type == DNS_QR_QUERY) {
+                    track_request(key, timestamp_store);
+                } else {
+                    track_response_dns(key, ipv4_hdr->dst_addr, ipv4_hdr->src_addr, timestamp_store, &dnsInfo);
+                }
 
             } else {
                 printf("dns parse error %d\n", ret);
@@ -490,7 +523,7 @@ dpdklatency_processing_loop(void)
 	struct rte_mbuf *m;
 	uint64_t prev_tsc, diff_tsc, cur_tsc, timer_tsc;
 	const uint64_t drain_tsc = (rte_get_tsc_hz() + US_PER_S - 1) / US_PER_S * BURST_TX_DRAIN_US;
-	uint64_t ipv4_timestamp_syn[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
+	uint64_t timestamp_store[TIMESTAMP_HASH_ENTRIES] __rte_cache_aligned;
 
 	prev_tsc = 0;
 	timer_tsc = 0;
@@ -559,7 +592,7 @@ dpdklatency_processing_loop(void)
 				rte_prefetch0(rte_pktmbuf_mtod(m, void *));
 
 				// Call the latency tracker function for every packet
-				track_latency(m, ipv4_timestamp_syn);
+				track_latency(m, timestamp_store);
 				// drop it like it's hot
 				rte_pktmbuf_free(m);
 			}
