@@ -427,7 +427,7 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
                     rte_pktmbuf_mtod_offset(m, u_char *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + sizeof(struct udp_hdr)),
                     rte_be_to_cpu_16(udp_hdr->dgram_len), &dnsInfo);
             if (ret == 0) {
-                printf("msgid %x type %d name %s\n%x %x %x %x\n%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
+                printf("msgid %x type %d name %s\n\t%x %x %x %x\n\t%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
                        dnsInfo.a_record[0], dnsInfo.a_record[1], dnsInfo.a_record[2], dnsInfo.a_record[3],
                        dnsInfo.a_record[4], dnsInfo.a_record[5], dnsInfo.a_record[6], dnsInfo.a_record[7]);
                 key = (uint64_t) (m->hash.rss << 16u | dnsInfo.msg_id);
@@ -438,7 +438,7 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
                 }
 
             } else {
-                printf("dns parse error %d\n", ret);
+//                printf("dns parse error %d\n", ret);
             }
 	    }
 	}
