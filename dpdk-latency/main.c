@@ -185,6 +185,7 @@ inline static unsigned long long timestamp_nanosecs()
 {
     struct timespec timestamp;
     clock_gettime(CLOCK_MONOTONIC, &timestamp);
+    printf("%lu.%lu\n", timestamp.tv_sec, timestamp.tv_nsec);
     return (unsigned long long)(CLOCK_PRECISION * timestamp.tv_sec) + timestamp.tv_nsec;
 }
 
