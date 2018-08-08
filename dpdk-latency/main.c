@@ -17,7 +17,6 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
-#include <resolv.h>
 
 #include <rte_common.h>
 #include <rte_log.h>
