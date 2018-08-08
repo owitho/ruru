@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include <arpa/nameser.h>
 
 #include <rte_common.h>
 #include <rte_log.h>
@@ -71,6 +72,14 @@ static int debug = 0;
  */
 #define RTE_TEST_RX_DESC_DEFAULT 128
 #define RTE_TEST_TX_DESC_DEFAULT 512
+#define MAX_RX_QUEUE_PER_LCORE 16
+#define RSS_HASH_KEY_LENGTH 40
+
+#define DNS_QR_QUERY 0
+#define DNS_QR_RESPONSE 1
+#define DNS_MAX_NAME_LEN 64
+#define DNS_MAX_A_RECORDS 8
+
 static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
 static uint16_t nb_txd = RTE_TEST_TX_DESC_DEFAULT;
 
@@ -82,12 +91,16 @@ struct mbuf_table {
 	struct rte_mbuf *m_table[MAX_PKT_BURST];
 };
 
-#define MAX_RX_QUEUE_PER_LCORE 16
+struct dns_info {
+    uint8_t qr_type;
+    uint16_t msg_id;
+    char query_name[DNS_MAX_NAME_LEN];
+    uint32_t a_record[DNS_MAX_A_RECORDS];
+};
 
 static struct rte_eth_dev_tx_buffer *tx_buffer[RTE_MAX_ETHPORTS];
 
 /* Magic hash key for symmetric RSS */
-#define RSS_HASH_KEY_LENGTH 40
 static uint8_t hash_key[RSS_HASH_KEY_LENGTH] = { 0x6D, 0x5A, 0x6D, 0x5A, 0x6D,
 	0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A,
 	0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D, 0x5A, 0x6D,
@@ -127,7 +140,7 @@ static uint64_t timer_period = 10; /* default period is 10 seconds */
 #define TIMESTAMP_HASH_ENTRIES 99999
 
 typedef struct rte_hash lookup_struct_t;
-static lookup_struct_t *ipv4_timestamp_lookup_struct[NB_SOCKETS];
+static lookup_struct_t *ipv4_tcp_timestamp_lookup_struct[NB_SOCKETS];
 
 
 #ifdef RTE_MACHINE_CPUFLAG_SSE4_2
@@ -227,14 +240,14 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 
 	lcore_id = rte_lcore_id();
 
-	ret = rte_hash_add_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
+	ret = rte_hash_add_key (ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
 	if (unlikely(debug)) {
 		printf("SYN lcore %u, ret: %d \n", lcore_id, ret);
 	}
 	if (ret < 0) {
 		RTE_LOG(INFO, DPDKLATENCY, "Hash table full for lcore %u - clearing it\n", lcore_id);
-		rte_hash_reset(ipv4_timestamp_lookup_struct[lcore_id]);
-		ret = rte_hash_add_key(ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
+		rte_hash_reset(ipv4_tcp_timestamp_lookup_struct[lcore_id]);
+		ret = rte_hash_add_key(ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
 		if (ret < 0) {
 			rte_exit(EXIT_FAILURE, "Unable to add SYN timestamp to hash after cleaning it");
 		}
@@ -252,17 +265,78 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uin
 	lcore_id = rte_lcore_id();
 	// printf("start processing tcp ack on lcore %d\n", lcore_id);
 
-	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
+	ret = rte_hash_lookup(ipv4_tcp_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
         elapsed = monotonic_time_nanosecs() - ipv4_timestamp_syn[ret];
 		printf("SYN-ACK %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
-		// If elapsed ms is more than 9999, we do not send it 
+		// limit elapsed time
 		if ((elapsed / 1000) < 10000000000L) {
             send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) (elapsed / 1000), timestamp_millisecs());
 		}
-		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
+		rte_hash_del_key (ipv4_tcp_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
+}
+
+static int
+parse_dns(u_char * buffer, uint16_t diagram_len, struct dns_info * dnsInfo) {
+    ns_msg nsMsg;
+    if (ns_initparse(buffer, diagram_len - 8, &nsMsg) != 0) {
+        return -1;
+    }
+    if (ns_msg_getflag(nsMsg, ns_f_rcode) != ns_r_noerror) {
+        return -2;
+    }
+    if (ns_msg_getflag(nsMsg, ns_f_opcode) != ns_o_query) {
+        return 1;
+    }
+    if (ns_msg_count(nsMsg, ns_s_qd) != 1) {
+        return 2;
+    }
+
+    int ans_count = ns_msg_count(nsMsg, ns_s_an);
+
+    uint16_t msg_id = (uint16_t) ns_msg_id(nsMsg);
+    int flag_qr = ns_msg_getflag(nsMsg, ns_f_qr);
+
+    if (flag_qr == DNS_QR_QUERY) { // query
+        dnsInfo->qr_type = DNS_QR_QUERY;
+        dnsInfo->msg_id = msg_id;
+
+    } else { // response
+        ns_rr rr;
+        if (ns_parserr(&nsMsg, ns_s_qd, 0, &rr) != 0) {
+            return -3;
+        }
+        char * name = ns_rr_name(rr);
+        size_t name_len = strlen(name);
+        if (name_len < DNS_MAX_NAME_LEN) {
+            strcpy(dnsInfo->query_name, name);
+        } else {
+            strncpy(dnsInfo->query_name, name, DNS_MAX_NAME_LEN - 1);
+            dnsInfo->query_name[DNS_MAX_NAME_LEN - 1] = '\0';
+        }
+
+        int a_count = 0;
+        for (int i = 0; i < ans_count && a_count < DNS_MAX_A_RECORDS; i++) {
+            if (ns_parserr(&nsMsg, ns_s_an, i, &rr) != 0) {
+                continue;
+            }
+            if (ns_rr_type(rr) == ns_t_a && ns_rr_class(rr) == ns_c_in) {
+                dnsInfo->a_record[a_count] = (uint32_t) ns_get32(ns_rr_rdata(rr));
+                a_count++;
+            }
+        }
+
+        for (; a_count < DNS_MAX_A_RECORDS; a_count++) {
+            dnsInfo->a_record[a_count] = 0;
+        }
+
+        dnsInfo->msg_id = msg_id;
+        dnsInfo->qr_type = DNS_QR_RESPONSE;
+    }
+
+    return 0;
 }
 
 static void
@@ -270,6 +344,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 {
 	struct ether_hdr *eth_hdr;
 	struct tcp_hdr *tcp_hdr = NULL;
+	struct udp_hdr *udp_hdr = NULL;
 	struct ipv4_hdr* ipv4_hdr;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint16_t tcp_seg_len;
@@ -285,15 +360,15 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 	
 	// IPv4	
 	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr));
-	if (ipv4_hdr->next_proto_id == IPPROTO_TCP){
-		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, 
+	if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
+		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *,
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		tcp_seg_len = (uint16_t) (rte_be_to_cpu_16(ipv4_hdr->total_length) - ((ipv4_hdr->version_ihl & 0x0f) << 2) - (tcp_hdr->data_off >> 4 << 2));
 		// printf("seglen %u = %u - %u - %u\n", tcp_seg_len, rte_be_to_cpu_16(ipv4_hdr->total_length), ((ipv4_hdr->version_ihl & 0x0f) << 2), (tcp_hdr->data_off >> 4 << 2));
 		// printf("SYNACK lcore %u hash %x src %x dst %x seq %u ack %u len %u\n", lcore_id, m->hash.rss, rte_be_to_cpu_32(ipv4_hdr->src_addr), rte_be_to_cpu_32(ipv4_hdr->dst_addr), rte_be_to_cpu_32(tcp_hdr->sent_seq), rte_be_to_cpu_32(tcp_hdr->recv_ack), tcp_seg_len);
 		
-		switch (tcp_hdr->tcp_flags){ 
+		switch (tcp_hdr->tcp_flags){
 			case SYN_FLAG | ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->sent_seq) + 1);
 				track_latency_syn_v4(key, ipv4_timestamp_syn);
@@ -312,9 +387,25 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
             default:
                 break;
 		}
+
+	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
+	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
+	    /* recognize dns packet */
+	    if (udp_hdr->src_port == 53 || udp_hdr->dst_port == 53) {
+	        struct dns_info dnsInfo;
+            int ret = parse_dns(
+                    rte_pktmbuf_mtod_offset(m, u_char *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + sizeof(struct udp_hdr)),
+                    udp_hdr->dgram_len, &dnsInfo);
+            if (ret == 0) {
+                // todo
+                printf("msgid %x type %d name %s\n%x %x %x %x\n%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
+                       dnsInfo.a_record[0], dnsInfo.a_record[1], dnsInfo.a_record[2], dnsInfo.a_record[3],
+                       dnsInfo.a_record[4], dnsInfo.a_record[5], dnsInfo.a_record[6], dnsInfo.a_record[7]);
+
+            }
+	    }
 	}
 }
-
 
 /* Send the burst of packets on an output interface */
 static int
@@ -745,9 +836,9 @@ setup_hash(int lcoreid)
 	snprintf(s, sizeof(s), "ipv4_timestamp_hash_%d", lcoreid);
 	ipv4_timestamp_hash_params.name = s;
 	ipv4_timestamp_hash_params.socket_id = 0;
-	ipv4_timestamp_lookup_struct[lcoreid] =
+	ipv4_tcp_timestamp_lookup_struct[lcoreid] =
 		rte_hash_create(&ipv4_timestamp_hash_params);
-	if (ipv4_timestamp_lookup_struct[lcoreid] == NULL)
+	if (ipv4_tcp_timestamp_lookup_struct[lcoreid] == NULL)
 		rte_exit(EXIT_FAILURE, "Unable to create the timestamp hash on "
 				"socket %d\n", 0);
 }
@@ -755,7 +846,6 @@ setup_hash(int lcoreid)
 static int
 init_hash(void)
 {
-	struct lcore_conf *qconf;
 	int socketid = 0;
 	unsigned lcore_id;
 
@@ -770,8 +860,6 @@ init_hash(void)
 		}
 		printf("Setting up hash table for lcore %u, on socket %u\n", lcore_id, socketid);
 		setup_hash(lcore_id);
-
-		qconf = &lcore_conf[lcore_id];
 	}
 	return 0;
 }
