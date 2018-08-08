@@ -174,22 +174,33 @@ static struct lcore_conf lcore_conf[RTE_MAX_LCORE] __rte_cache_aligned;
 
 FILE * output_file = NULL;
 
-static void
-send_data_ipv4(uint32_t sourceip, uint32_t destip, unsigned long long int timestamp)
-{
-	char message[6+1+8+1+8+1+10+2];
+inline static void data_output(char * message) {
+    if (output_file != NULL) {
+        fputs(message, output_file);
+    }
+}
 
-	snprintf(message, sizeof(message), "RTTTCP\t%08x\t%08x\t%010llu\n",
-		(unsigned) sourceip, (unsigned) destip, timestamp);
+inline static long timestamp_nanosecs()
+{
+    struct timespec timestamp;
+    clock_gettime(CLOCK_MONOTONIC, &timestamp);
+    return CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
+}
+
+static void
+send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, unsigned long timestamp_msecs)
+{
+	char message[6+1+10+1+8+1+8+1+10+2];
+
+	snprintf(message, sizeof(message), "RTTTCP\t%010llu\t%08x\t%08x\t%010llu\n",
+		timestamp_msecs, (unsigned) sourceip, (unsigned) destip, rtt_usecs);
 
 	if (unlikely(debug)){
 		printf("%s", message);
 		fflush(stdout);
 	}
 
-	if (output_file != NULL) {
-	    fputs(message, output_file);
-	}
+	data_output(message);
 }
 
 
@@ -198,7 +209,6 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 {
 	int ret = 0;
 	unsigned lcore_id;
-	struct timespec timestamp;
 
 	lcore_id = rte_lcore_id();
 
@@ -214,15 +224,13 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 			rte_exit(EXIT_FAILURE, "Unable to add SYN timestamp to hash after cleaning it");
 		}
 	}
-	clock_gettime(CLOCK_MONOTONIC, &timestamp);
-	ipv4_timestamp_syn[ret] = CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
+	ipv4_timestamp_syn[ret] = (uint64_t) timestamp_nanosecs();
 }
 
 static void
 track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t *ipv4_timestamp_syn)
 {
 	unsigned lcore_id;
-	struct timespec timestamp;
 	double elapsed;
 	int ret = 0;
 
@@ -232,12 +240,12 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
-		clock_gettime(CLOCK_MONOTONIC, &timestamp);
-		elapsed = (CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec) - ipv4_timestamp_syn[ret];
+        long timestamp = timestamp_nanosecs();
+        elapsed = timestamp - ipv4_timestamp_syn[ret];
 		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed / 1000, sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
 		if ((elapsed / 1000000) < 9999){
-			send_data_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000);
+            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000, timestamp / 1000000);
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
