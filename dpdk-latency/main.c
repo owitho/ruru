@@ -661,7 +661,7 @@ dpdklatency_parse_args(int argc, char **argv)
 
 /* Check the link status of all ports in up to 9s, and print them finally */
 static void
-check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
+check_all_ports_link_status(uint16_t port_num, uint32_t port_mask)
 {
 #define CHECK_INTERVAL 100 /* 100ms */
 #define MAX_CHECK_TIME 90 /* 9s (90 * 100ms) in total */
@@ -677,7 +677,7 @@ check_all_ports_link_status(uint8_t port_num, uint32_t port_mask)
 		for (portid = 0; portid < port_num; portid++) {
 			if (force_quit)
 				return;
-			if ((port_mask & (1 << portid)) == 0)
+			if ((port_mask & (1u << portid)) == 0)
 				continue;
 			memset(&link, 0, sizeof(link));
 			rte_eth_link_get_nowait(portid, &link);
@@ -961,7 +961,7 @@ main(int argc, char **argv)
 	rte_eal_mp_wait_lcore();
 
 	for (portid = 0; portid < nb_ports; portid++) {
-		if ((dpdklatency_enabled_port_mask & (1 << portid)) == 0)
+		if ((dpdklatency_enabled_port_mask & (1u << portid)) == 0)
 			continue;
 		printf("Closing port %d...", portid);
 		rte_eth_dev_stop(portid);
