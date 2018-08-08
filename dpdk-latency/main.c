@@ -360,6 +360,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 	
 	// IPv4	
 	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr));
+
 	if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *,
 			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
@@ -389,9 +390,9 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 		}
 
 	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
-
 	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
-	    /* recognize dns packet */
+        printf("UDP src %d dst %d len %d\n", udp_hdr->src_port, udp_hdr->dst_port, udp_hdr->dgram_len);
+        /* recognize dns packet */
 	    if (udp_hdr->src_port == 53 || udp_hdr->dst_port == 53) {
 	        struct dns_info dnsInfo;
             int ret = parse_dns(
