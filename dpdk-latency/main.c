@@ -391,13 +391,13 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 
 	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
 	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
-        printf("UDP src %d dst %d len %d\n", udp_hdr->src_port, udp_hdr->dst_port, udp_hdr->dgram_len);
+        printf("UDP src %d dst %d len %d\n", rte_be_to_cpu_16(udp_hdr->src_port), rte_be_to_cpu_16(udp_hdr->dst_port), rte_be_to_cpu_16(udp_hdr->dgram_len));
         /* recognize dns packet */
-	    if (udp_hdr->src_port == 53 || udp_hdr->dst_port == 53) {
+	    if (rte_be_to_cpu_16(udp_hdr->src_port) == 53 || rte_be_to_cpu_16(udp_hdr->dst_port) == 53) {
 	        struct dns_info dnsInfo;
             int ret = parse_dns(
                     rte_pktmbuf_mtod_offset(m, u_char *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + sizeof(struct udp_hdr)),
-                    udp_hdr->dgram_len, &dnsInfo);
+                    rte_be_to_cpu_16(udp_hdr->dgram_len), &dnsInfo);
             if (ret == 0) {
                 // todo
                 printf("msgid %x type %d name %s\n%x %x %x %x\n%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
