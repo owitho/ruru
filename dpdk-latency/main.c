@@ -15,6 +15,7 @@
 #include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <arpa/inet.h>
 
 #include <rte_common.h>
 #include <rte_log.h>
@@ -190,10 +191,17 @@ inline static long timestamp_nanosecs()
 static void
 send_rtt_tcp_ipv4(uint32_t sourceip, uint32_t destip, unsigned long rtt_usecs, unsigned long timestamp_msecs)
 {
-	char message[6+1+10+1+8+1+8+1+10+2];
+    struct in_addr inaddr;
+	char message[6+1+13+1+15+1+15+1+10+2];
+	char src_ip[INET_ADDRSTRLEN], dst_ip[INET_ADDRSTRLEN];
 
-	snprintf(message, sizeof(message), "RTTTCP\t%010llu\t%08x\t%08x\t%010llu\n",
-		timestamp_msecs, (unsigned) sourceip, (unsigned) destip, rtt_usecs);
+	inaddr.s_addr = sourceip;
+	inet_ntop(AF_INET, &inaddr, src_ip, sizeof(src_ip));
+	inaddr.s_addr = destip;
+	inet_ntop(AF_INET, &inaddr, dst_ip, sizeof(dst_ip));
+
+	snprintf(message, sizeof(message), "RTTTCP\t%13llu\t%s\t%s\t%10llu\n",
+		timestamp_msecs, src_ip, dst_ip, rtt_usecs);
 
 	if (unlikely(debug)){
 		printf("%s", message);
@@ -244,8 +252,8 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
         elapsed = timestamp - ipv4_timestamp_syn[ret];
 		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed / 1000, sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
-		if ((elapsed / 1000000) < 9999){
-            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long long int) elapsed / 1000, timestamp / 1000000);
+		if ((elapsed / 1000) < 9999999) {
+            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) elapsed / 1000, (unsigned long) (timestamp / 1000000));
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
@@ -260,7 +268,7 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint16_t tcp_seg_len;
 	uint64_t key;
-	unsigned lcore_id = rte_lcore_id();
+//	unsigned lcore_id = rte_lcore_id();
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 
@@ -291,9 +299,9 @@ track_latency(struct rte_mbuf *m, uint64_t *ipv4_timestamp_syn)
 			case ACK_FLAG:
 				key = (long long) m->hash.rss << 32 | (rte_be_to_cpu_32(tcp_hdr->recv_ack));
 				track_latency_ack_v4(key,
-					rte_be_to_cpu_32(ipv4_hdr->dst_addr),
-					rte_be_to_cpu_32(ipv4_hdr->src_addr),
-					ipv4_timestamp_syn);
+                                     ipv4_hdr->dst_addr,
+                                     ipv4_hdr->src_addr,
+                                     ipv4_timestamp_syn);
 				break;
             default:
                 break;
