@@ -181,11 +181,11 @@ inline static void data_output(char * message) {
     }
 }
 
-inline static long timestamp_nanosecs()
+inline static unsigned long long timestamp_nanosecs()
 {
     struct timespec timestamp;
     clock_gettime(CLOCK_MONOTONIC, &timestamp);
-    return CLOCK_PRECISION * timestamp.tv_sec + timestamp.tv_nsec;
+    return (CLOCK_PRECISION * timestamp.tv_sec) + timestamp.tv_nsec;
 }
 
 static void
@@ -236,10 +236,10 @@ track_latency_syn_v4(uint64_t key, uint64_t *ipv4_timestamp_syn)
 }
 
 static void
-track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t *ipv4_timestamp_syn)
+track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, const uint64_t *ipv4_timestamp_syn)
 {
 	unsigned lcore_id;
-	double elapsed;
+    unsigned long long elapsed, timestamp;
 	int ret = 0;
 
 	lcore_id = rte_lcore_id();
@@ -248,12 +248,12 @@ track_latency_ack_v4(uint64_t key, uint32_t sourceip, uint32_t destip, uint64_t 
 	ret = rte_hash_lookup(ipv4_timestamp_lookup_struct[lcore_id], (const void *) &key);
 	// printf("hash lookup: %d\n", ret);
 	if (ret >= 0) {
-        long timestamp = timestamp_nanosecs();
+        timestamp = timestamp_nanosecs();
         elapsed = timestamp - ipv4_timestamp_syn[ret];
-		printf("SYN-ACK %d %llu microsecs from %08x to %08x\n", ret, (unsigned long long int) elapsed / 1000, sourceip, destip);
+		printf("SYN-ACK %d %lu microsecs from %08x to %08x\n", ret, (unsigned long) (elapsed / 1000), sourceip, destip);
 		// If elapsed ms is more than 9999, we do not send it 
-		if ((elapsed / 1000) < 9999999) {
-            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) elapsed / 1000, (unsigned long) (timestamp / 1000000));
+		if ((elapsed / 1000) < 10000000000L) {
+            send_rtt_tcp_ipv4(destip, sourceip, (unsigned long) (elapsed / 1000), (unsigned long) (timestamp / 1000000));
 		}
 		rte_hash_del_key (ipv4_timestamp_lookup_struct[lcore_id], (void *) &key);
 	}
