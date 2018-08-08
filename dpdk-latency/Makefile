@@ -47,5 +47,6 @@ SRCS-y := main.c
 
 CFLAGS += -O3
 CFLAGS += -Werror=unused-value -Werror=unused-parameter
+LDFLAGS += -lresolv
 
 include $(RTE_SDK)/mk/rte.extapp.mk
