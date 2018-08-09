@@ -191,6 +191,7 @@ FILE * output_file = NULL;
 inline static void data_output(char * message) {
     if (output_file != NULL) {
         fputs(message, output_file);
+        fflush(output_file);
     }
 }
 
