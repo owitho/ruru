@@ -394,7 +394,7 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 	struct ipv4_hdr* ipv4_hdr;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint16_t tcp_seg_len;
-    size_t vlan_offset = 0;
+    size_t vlan_offset = 0, ether_offset = 0, ipv4_offset = 0;
 	uint64_t key;
 //	unsigned lcore_id = rte_lcore_id();
 
@@ -409,12 +409,13 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 		return;
 	}
 	
-	// IPv4	
-	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr) + vlan_offset);
+	// IPv4
+    ether_offset = sizeof(struct ether_hdr) + vlan_offset;
+	ipv4_offset = ether_offset + sizeof(struct ipv4_hdr);
+	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, ether_offset);
 
 	if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
-		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *,
-			sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
+		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *, ipv4_offset);
 		// printf("tcp_flags: %u\n", tcp_hdr->tcp_flags);
 		tcp_seg_len = (uint16_t) (rte_be_to_cpu_16(ipv4_hdr->total_length) - ((ipv4_hdr->version_ihl & 0x0f) << 2) - (tcp_hdr->data_off >> 4 << 2));
 		// printf("seglen %u = %u - %u - %u\n", tcp_seg_len, rte_be_to_cpu_16(ipv4_hdr->total_length), ((ipv4_hdr->version_ihl & 0x0f) << 2), (tcp_hdr->data_off >> 4 << 2));
@@ -441,13 +442,13 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 		}
 
 	} else if (ipv4_hdr->next_proto_id == IPPROTO_UDP) {
-	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr));
+	    udp_hdr = rte_pktmbuf_mtod_offset(m, struct udp_hdr *, ipv4_offset);
 //        printf("UDP src %d dst %d len %d\n", rte_be_to_cpu_16(udp_hdr->src_port), rte_be_to_cpu_16(udp_hdr->dst_port), rte_be_to_cpu_16(udp_hdr->dgram_len));
         /* recognize dns packet */
 	    if (rte_be_to_cpu_16(udp_hdr->src_port) == 53 || rte_be_to_cpu_16(udp_hdr->dst_port) == 53) {
 	        struct dns_info dnsInfo;
             int ret = parse_dns(
-                    rte_pktmbuf_mtod_offset(m, u_char *, sizeof(struct ipv4_hdr) + sizeof(struct ether_hdr) + sizeof(struct udp_hdr)),
+                    rte_pktmbuf_mtod_offset(m, u_char *, ipv4_offset + sizeof(struct udp_hdr)),
                     rte_be_to_cpu_16(udp_hdr->dgram_len), &dnsInfo);
             if (ret == 0) {
                 printf("msgid %x type %d name %s\n\t%x %x %x %x\n\t%x %x %x %x\n", dnsInfo.msg_id, dnsInfo.qr_type, dnsInfo.query_name,
