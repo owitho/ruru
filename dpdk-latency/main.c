@@ -232,6 +232,23 @@ send_rtt_ipv4(char *type, uint32_t sourceip, uint32_t destip, unsigned long rtt_
 	data_output(message);
 }
 
+/* For vlan tagged packets, we need to find the offset in order to remove tagging */
+static inline size_t
+get_vlan_offset(struct ether_hdr *eth_hdr, uint16_t *proto)
+{
+    size_t vlan_offset = 0;
+    if (rte_cpu_to_be_16(ETHER_TYPE_VLAN) == *proto) {
+        struct vlan_hdr *vlan_hdr = (struct vlan_hdr *)(eth_hdr + 1);
+        vlan_offset = sizeof(struct vlan_hdr);
+        *proto = vlan_hdr->eth_proto;
+        if (rte_cpu_to_be_16(ETHER_TYPE_VLAN) == *proto) {
+            vlan_hdr = vlan_hdr + 1;
+            *proto = vlan_hdr->eth_proto;
+            vlan_offset += sizeof(struct vlan_hdr);
+        }
+    }
+    return vlan_offset;
+}
 
 static void
 track_request(uint64_t key, uint64_t *ipv4_timestamp_syn)
@@ -377,10 +394,15 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 	struct ipv4_hdr* ipv4_hdr;
 	enum { URG_FLAG = 0x20, ACK_FLAG = 0x10, PSH_FLAG = 0x08, RST_FLAG = 0x04, SYN_FLAG = 0x02, FIN_FLAG = 0x01 };
 	uint16_t tcp_seg_len;
+    size_t vlan_offset = 0;
 	uint64_t key;
 //	unsigned lcore_id = rte_lcore_id();
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
+    //VLAN tagged frame
+    if (eth_hdr->ether_type == rte_cpu_to_be_16(ETHER_TYPE_VLAN)){
+        vlan_offset = get_vlan_offset(eth_hdr, &eth_hdr->ether_type);
+    }
 
 	/* ignore non-ipv4 packets (including vlan) */
 	if (eth_hdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_IPv4)) {
@@ -388,7 +410,7 @@ track_latency(struct rte_mbuf *m, uint64_t *timestamp_store)
 	}
 	
 	// IPv4	
-	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr));
+	ipv4_hdr = rte_pktmbuf_mtod_offset(m, struct ipv4_hdr *, sizeof(struct ether_hdr) + vlan_offset);
 
 	if (ipv4_hdr->next_proto_id == IPPROTO_TCP) {
 		tcp_hdr = rte_pktmbuf_mtod_offset(m, struct tcp_hdr *,
